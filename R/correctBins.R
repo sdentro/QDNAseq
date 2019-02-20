@@ -26,6 +26,7 @@
 #         bins with uncharacterized nucleotides (N's) in their reference genome
 #         sequence should be adjusted by dividing them with the percentage of
 #         characterized (A, C, G, T) nucleotides. Defaults to @TRUE.}
+#     \item{correctReplication}{boolean(1)}
 #     \item{...}{Additional arguments passed to @see "estimateCorrection".}
 # }
 #
@@ -53,7 +54,7 @@
 
 setMethod("correctBins", signature=c(object="QDNAseqReadCounts"),
     definition=function(object, fit=NULL,
-    method=c("ratio", "median", "none"), adjustIncompletes=TRUE, ...) {
+    method=c("ratio", "median", "none"), adjustIncompletes=TRUE, correctReplication=FALSE, ...) {
     counts <- assayDataElement(object, "counts")
     if (adjustIncompletes) {
         counts <- counts / fData(object)$bases * 100L
@@ -71,19 +72,37 @@ setMethod("correctBins", signature=c(object="QDNAseqReadCounts"),
     if (!is.matrix(fit))
         stop("Argument fit has to be either a matrix, ",
             "or NULL, in which case estimateCorrection() is executed first.")
+
+    print(paste0("METHOD IS ", method))
     if (method == "median") {
         gc <- round(fData(object)$gc)
         mappability <- round(fData(object)$mappability)
-        fit2 <- aggregate(fit, by=list(gc=gc,
-            mappability=mappability), FUN=median)
-        rownames(fit2) <- paste0(fit2$gc, "-", fit2$mappability)
+	if (!correctReplication) {
+		print("NO REPLICATION")
+	        fit2 <- aggregate(fit, by=list(gc=gc,
+        	    mappability=mappability), FUN=median)
+        	rownames(fit2) <- paste0(fit2$gc, "-", fit2$mappability)
+	} else {
+		print("REPLICATION")
+		replication = fData(object)$replication
+		print(head(replication))
+		fit2 <- aggregate(fit, by=list(gc=gc,
+					       mappability=mappability,
+					       replication=replication), FUN=median)
+		rownames(fit2) <- paste0(fit2$gc, "-", fit2$mappability, "-", fit2$replication)
+	}
         corrected <- matrix(NA_real_, nrow=nrow(counts), ncol=ncol(counts),
             dimnames=dimnames(counts))
         for (s in sampleNames(object)) {
             correction <- median(fit2[, s], na.rm=TRUE) - fit2[, s]
             names(correction) <- rownames(fit2)
-            corrected[, s] <- counts[, s] + correction[
-                paste0(gc, "-", mappability)]
+	    if (!correctReplication) {
+ 	           corrected[, s] <- counts[, s] + correction[
+        	        paste0(gc, "-", mappability)]
+	    } else {
+		    corrected[, s] <- counts[, s] + correction[
+			paste0(gc, "-", mappability, "-", replication)]
+	    }
             corrected[, s] <- corrected[, s] - min(corrected[, s], na.rm=TRUE)
         }
     } else {
