@@ -65,8 +65,13 @@ setMethod("correctBins", signature=c(object="QDNAseqReadCounts"),
         fit <- matrix(1, nrow=nrow(counts), ncol=ncol(counts),
             dimnames=dimnames(counts))
     if (is.null(fit)) {
-        if (! "fit" %in% assayDataElementNames(object))
-            object <- estimateCorrection(object, ...)
+        if (! "fit" %in% assayDataElementNames(object)) {
+		if (!correctReplication) {
+	            object <- estimateCorrection(object, ...)
+		} else {
+			object <- estimateCorrectionReplication(object, ...)
+		}
+	}
         fit <- assayDataElement(object, "fit")
     }
     if (!is.matrix(fit))

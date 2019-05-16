@@ -1,7 +1,7 @@
 #########################################################################/**
-# @RdocFunction estimateCorrection
+# @RdocFunction estimateCorrectionReplication
 #
-# @alias estimateCorrection,QDNAseqReadCounts-method
+# @alias estimateCorrectionReplication,QDNAseqReadCounts-method
 #
 # @title "Estimate correction to read counts for GC content and mappability"
 #
@@ -59,10 +59,10 @@
 # @keyword loess
 #*/#########################################################################
 
-setMethod("estimateCorrection", signature=c(object="QDNAseqReadCounts"),
+setMethod("estimateCorrectionReplication", signature=c(object="QDNAseqReadCounts"),
     definition=function(object, span=0.65, family="symmetric",
     adjustIncompletes=TRUE, maxIter=1, cutoff=4.0,
-    variables=c("gc", "mappability"), ...) {
+    variables=c("gc", "mappability", "replication"), ...) {
 
     counts <- assayDataElement(object, "counts")
     if (adjustIncompletes) {
@@ -70,7 +70,7 @@ setMethod("estimateCorrection", signature=c(object="QDNAseqReadCounts"),
         counts[fData(object)$bases == 0] <- 0L
     }
     variables <- match.arg(variables, several.ok=TRUE)
-    descriptions <- c(gc="GC content", mappability="mappability")
+    descriptions <- c(gc="GC content", mappability="mappability", replication="replication")
     vmsg("Calculating correction for ",
         paste(descriptions[variables], collapse=" and "))
     if (length(span) == 1L)
@@ -86,12 +86,14 @@ setMethod("estimateCorrection", signature=c(object="QDNAseqReadCounts"),
     condition <- binsToUse(object)
     gc <- round(fData(object)$gc)
     mappability <- round(fData(object)$mappability)
-    condition <- condition & !is.na(gc) & !is.na(mappability)
+    replication <- round(fData(object)$replication, 2)*10
+    condition <- condition & !is.na(gc) & !is.na(mappability) & !is.na(replication)
     # to interpolate
     all.combinations <- expand.grid(gc=unique(gc[!is.na(gc)]),
-        mappability=unique(mappability[!is.na(mappability)]))
+        mappability=unique(mappability[!is.na(mappability)]),
+	replication=unique(replication[!is.na(replication)]))
     rownames(all.combinations) <- paste0(all.combinations$gc, "-",
-        all.combinations$mappability)
+        all.combinations$mappability, "-", all.combinations$replication)
     calculateFits <-  function(i, ...) {
         if (is.na(span[i]) && is.na(family[i])) {
             vmsg("    Skipping sample ", sampleNames(object)[i], "...")
@@ -105,17 +107,17 @@ setMethod("estimateCorrection", signature=c(object="QDNAseqReadCounts"),
         try({
             corvals <- counts[, i]
             median.counts <- aggregate(counts[condition, i],
-                by=list(gc=gc[condition], mappability=mappability[condition]),
+                by=list(gc=gc[condition], mappability=mappability[condition], replication=replication[condition]),
                 FUN=median)
             rownames(median.counts) <- paste0(median.counts$gc, "-",
-                median.counts$mappability)
+                median.counts$mappability, "-", median.counts$replication)
             l <- loess(formula(paste("x ~", paste(variables, collapse=" * "))),
                 data=median.counts, span=span[i], family=family[i], ...)
             # fit <- l$fitted
             # names(fit) <- rownames(median.counts)
             fit <- as.vector(predict(l, all.combinations))
             names(fit) <- rownames(all.combinations)
-            residual <- corvals / fit[paste0(gc, "-", mappability)] - 1
+            residual <- corvals / fit[paste0(gc, "-", mappability, "-", replication)] - 1
             cutoffValue <- cutoff * madDiff(residual, na.rm=TRUE)
             prevGoodBins <- condition
             goodBins <- binsToUse(object) & !is.na(residual) &
@@ -123,24 +125,24 @@ setMethod("estimateCorrection", signature=c(object="QDNAseqReadCounts"),
             iter <- 1
             while(!identical(goodBins, prevGoodBins) && iter < maxIter) {
                 median.counts2 <- aggregate(counts[goodBins, i],
-                    by=list(gc=gc[goodBins], mappability=mappability[goodBins]),
+                    by=list(gc=gc[goodBins], mappability=mappability[goodBins], replication=replication[goodBins]),
                     FUN=median)
                 rownames(median.counts2) <- paste0(median.counts2$gc, "-",
-                    median.counts2$mappability)
-                l2 <- loess(x ~ gc * mappability,
+                    median.counts2$mappability, "-", median.counts2$replication)
+                l2 <- loess(x ~ gc * mappability * replication,
                     data=median.counts2, span=span[i], family=family[i], ...)
                 # fit2 <- l$fitted
                 # names(fit2) <- rownames(median.counts)
                 fit2 <- as.vector(predict(l2, all.combinations))
                 names(fit2) <- rownames(all.combinations)
                 fit[!is.na(fit2)] <- fit2[!is.na(fit2)]
-                residual <- corvals / fit[paste0(gc, "-", mappability)] - 1
+                residual <- corvals / fit[paste0(gc, "-", mappability, "-", replication)] - 1
                 prevGoodBins <- goodBins
                 goodBins <- binsToUse(object) & !is.na(residual) &
                     abs(residual) <= cutoffValue
                 iter <- iter + 1
             }
-            loessFit <- fit[paste0(gc, "-", mappability)]
+            loessFit <- fit[paste0(gc, "-", mappability, "-", replication)]
             attr(loessFit, "used.span") <- span[i]
             attr(loessFit, "used.family") <- family[i]
             return(loessFit)
